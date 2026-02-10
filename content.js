@@ -24,16 +24,49 @@
   }
 
   function findChatScrollContainer() {
-    // The scrollable area within the chat panel
-    const candidates = [
-      "div.chat-panel-content",
-      "section.chat-panel div.panel-content-scrollable",
-      "section.chat-panel",
-    ];
-    for (const sel of candidates) {
-      const el = document.querySelector(sel);
-      if (el && el.scrollHeight > 0) return el;
+    const chatPanel = findChatPanel();
+    if (!chatPanel) return null;
+
+    // Strategy 1: Angular CDK virtual scroll viewport (if used)
+    const viewport = chatPanel.querySelector("cdk-virtual-scroll-viewport");
+    if (viewport && viewport.scrollHeight > viewport.clientHeight + 20) {
+      return viewport;
     }
+
+    // Strategy 2: Walk all descendants of the chat panel and find the
+    // one that's actually scrollable (overflow auto/scroll AND has
+    // more content than fits)
+    const allEls = chatPanel.querySelectorAll("*");
+    let best = null;
+    let bestOverflow = 0;
+
+    for (const el of allEls) {
+      if (el.id === BUTTON_ID || el.id === PRINT_CONTAINER_ID) continue;
+      const overflow = el.scrollHeight - el.clientHeight;
+      if (overflow < 50) continue;
+
+      const style = window.getComputedStyle(el);
+      const oy = style.overflowY;
+      if (oy === "auto" || oy === "scroll" || oy === "overlay") {
+        if (overflow > bestOverflow) {
+          bestOverflow = overflow;
+          best = el;
+        }
+      }
+    }
+
+    if (best) return best;
+
+    // Strategy 3: The chat panel itself might be scrollable
+    if (chatPanel.scrollHeight > chatPanel.clientHeight + 50) {
+      return chatPanel;
+    }
+
+    // Strategy 4: Maybe the whole page scrolls
+    if (document.documentElement.scrollHeight > document.documentElement.clientHeight + 100) {
+      return document.documentElement;
+    }
+
     return null;
   }
 
@@ -558,11 +591,25 @@
       });
     });
 
+    // Identify the scroll container element for debugging
+    let scrollContainerInfo = null;
+    if (scrollContainer) {
+      const tag = scrollContainer.tagName.toLowerCase();
+      const cls = scrollContainer.className
+        ? scrollContainer.className.toString().split(" ").slice(0, 4).join(".")
+        : "(no class)";
+      scrollContainerInfo = `${tag}.${cls}`;
+    }
+
     return {
       hasChatPanel: !!chatPanel,
       hasScrollContainer: !!scrollContainer,
+      scrollContainerEl: scrollContainerInfo,
       scrollHeight: scrollContainer ? scrollContainer.scrollHeight : 0,
       clientHeight: scrollContainer ? scrollContainer.clientHeight : 0,
+      scrollOverflow: scrollContainer
+        ? scrollContainer.scrollHeight - scrollContainer.clientHeight
+        : 0,
       messageCount: messagePairs.length,
       hasArtifact: !!artifact,
       hasCopyButton: !!copyBtn,
