@@ -1,0 +1,253 @@
+/* --- Export Button --- */
+
+.nlm-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 20px;
+  background: #1a73e8;
+  color: #fff;
+  font-family: "Google Sans", Roboto, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+  white-space: nowrap;
+  margin-right: 8px;
+  z-index: 100;
+}
+
+.nlm-export-btn:hover {
+  background: #1765cc;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.nlm-export-btn:active {
+  background: #1558b0;
+}
+
+.nlm-export-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.nlm-export-btn-floating {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* --- Notification --- */
+
+.nlm-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-family: "Google Sans", Roboto, Arial, sans-serif;
+  font-size: 14px;
+  color: #fff;
+  z-index: 10000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: opacity 0.3s;
+}
+
+.nlm-notification-success {
+  background: #1e8e3e;
+}
+
+.nlm-notification-error {
+  background: #d93025;
+}
+
+.nlm-notification-fade {
+  opacity: 0;
+}
+
+/* --- Print Container (hidden on screen, visible in print) --- */
+
+#nlm-pdf-print-container {
+  display: none;
+}
+
+/* --- Print Styles --- */
+
+@media print {
+  /* Hide everything except our print container */
+  body > *:not(#nlm-pdf-print-container) {
+    display: none !important;
+  }
+
+  #nlm-pdf-print-container {
+    display: block !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: #fff;
+    color: #1a1a1a;
+    font-family: "Georgia", "Times New Roman", serif;
+    font-size: 11pt;
+    line-height: 1.6;
+  }
+
+  /* Header */
+  .nlm-print-header {
+    margin-bottom: 32pt;
+    padding-bottom: 12pt;
+    border-bottom: 1pt solid #ccc;
+  }
+
+  .nlm-print-title {
+    font-family: "Google Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 22pt;
+    font-weight: 600;
+    color: #202124;
+    margin: 0 0 6pt;
+  }
+
+  .nlm-print-date {
+    font-size: 9pt;
+    color: #5f6368;
+    margin: 0;
+  }
+
+  /* Body content */
+  .nlm-print-body {
+    max-width: 100%;
+  }
+
+  .nlm-print-body h1 {
+    font-family: "Google Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 18pt;
+    font-weight: 600;
+    color: #202124;
+    margin: 24pt 0 8pt;
+    page-break-after: avoid;
+  }
+
+  .nlm-print-body h2 {
+    font-family: "Google Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 15pt;
+    font-weight: 600;
+    color: #202124;
+    margin: 20pt 0 6pt;
+    page-break-after: avoid;
+  }
+
+  .nlm-print-body h3 {
+    font-family: "Google Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13pt;
+    font-weight: 600;
+    color: #3c4043;
+    margin: 16pt 0 4pt;
+    page-break-after: avoid;
+  }
+
+  .nlm-print-body h4 {
+    font-family: "Google Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 11pt;
+    font-weight: 600;
+    color: #3c4043;
+    margin: 12pt 0 4pt;
+    page-break-after: avoid;
+  }
+
+  .nlm-print-body p {
+    margin: 0 0 8pt;
+    orphans: 3;
+    widows: 3;
+  }
+
+  .nlm-print-body ul,
+  .nlm-print-body ol {
+    margin: 4pt 0 8pt 20pt;
+    padding: 0;
+  }
+
+  .nlm-print-body li {
+    margin-bottom: 3pt;
+  }
+
+  .nlm-print-body blockquote {
+    margin: 8pt 0 8pt 16pt;
+    padding: 4pt 0 4pt 12pt;
+    border-left: 3pt solid #dadce0;
+    color: #5f6368;
+    font-style: italic;
+  }
+
+  .nlm-print-body code {
+    font-family: "Roboto Mono", "Courier New", monospace;
+    font-size: 9pt;
+    background: #f1f3f4;
+    padding: 1pt 4pt;
+    border-radius: 3pt;
+  }
+
+  .nlm-print-body pre {
+    background: #f8f9fa;
+    border: 0.5pt solid #dadce0;
+    border-radius: 4pt;
+    padding: 10pt 12pt;
+    margin: 8pt 0;
+    overflow-x: auto;
+    page-break-inside: avoid;
+  }
+
+  .nlm-print-body pre code {
+    background: none;
+    padding: 0;
+    font-size: 8.5pt;
+    line-height: 1.5;
+  }
+
+  .nlm-print-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8pt 0;
+    font-size: 10pt;
+    page-break-inside: avoid;
+  }
+
+  .nlm-print-body th,
+  .nlm-print-body td {
+    border: 0.5pt solid #dadce0;
+    padding: 6pt 8pt;
+    text-align: left;
+  }
+
+  .nlm-print-body th {
+    background: #f1f3f4;
+    font-weight: 600;
+  }
+
+  .nlm-print-body hr {
+    border: none;
+    border-top: 0.5pt solid #dadce0;
+    margin: 16pt 0;
+  }
+
+  .nlm-print-body a {
+    color: #1a73e8;
+    text-decoration: none;
+  }
+
+  .nlm-print-body strong {
+    font-weight: 700;
+  }
+
+  .nlm-print-body img {
+    max-width: 100%;
+    page-break-inside: avoid;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 20mm 18mm;
+  }
+}

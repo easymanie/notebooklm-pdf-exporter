@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "NotebookLM PDF Exporter",
+  "version": "1.0.0",
+  "description": "Export NotebookLM notes and reports to clean, well-formatted PDFs",
+  "permissions": ["activeTab", "scripting", "clipboardRead"],
+  "host_permissions": ["https://notebooklm.google.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://notebooklm.google.com/*"],
+      "js": ["lib/marked.min.js", "content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
