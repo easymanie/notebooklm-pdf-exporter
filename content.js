@@ -202,62 +202,88 @@
   // --- Scroll-and-Collect for Full Chat ---
 
   async function extractFullChat(updateStatus) {
-    const scrollContainer = findChatScrollContainer();
-    if (!scrollContainer) return null;
+    // Instead of guessing the scroll container, we use scrollIntoView()
+    // on message pairs — this works regardless of which element scrolls.
 
-    // Always scroll to the top and collect the full chat,
-    // regardless of current scroll position.
+    // Step 1: Scroll the FIRST message into view to get to the top
     updateStatus("Scrolling to top...");
-    scrollContainer.scrollTop = 0;
-    await sleep(600);
+    const firstMsg = document.querySelector("div.chat-message-pair");
+    if (!firstMsg) return null;
 
+    firstMsg.scrollIntoView({ block: "start", behavior: "instant" });
+    await sleep(800);
+
+    // Step 2: Collect messages by scrolling through every message pair.
+    // We scroll each message-pair into view one at a time, extract it,
+    // then move to the next. This guarantees we get every message
+    // regardless of virtual scrolling.
     const allMessages = [];
     const seenTexts = new Set();
-    const scrollStep = Math.floor(scrollContainer.clientHeight * 0.6);
-    const maxScrolls = 300;
+    let lastPairCount = 0;
+    let staleRounds = 0;
+    const maxRounds = 500;
 
-    for (let i = 0; i < maxScrolls; i++) {
-      // Extract currently visible messages
-      const visible = extractVisibleMessages();
-      for (const msg of visible) {
-        // Deduplicate using first 120 chars of text
-        const key = msg.text.substring(0, 120).trim();
-        if (key.length > 0 && !seenTexts.has(key)) {
-          seenTexts.add(key);
-          allMessages.push(msg);
-        }
-      }
+    for (let round = 0; round < maxRounds; round++) {
+      const pairs = document.querySelectorAll("div.chat-message-pair");
 
-      // Scroll down
-      const prevTop = scrollContainer.scrollTop;
-      scrollContainer.scrollTop += scrollStep;
-      await sleep(300);
-
-      // Reached bottom?
-      const atBottom =
-        Math.abs(scrollContainer.scrollTop - prevTop) < 5 ||
-        scrollContainer.scrollTop + scrollContainer.clientHeight >=
-          scrollContainer.scrollHeight - 5;
-
-      if (atBottom) {
-        // Capture final position
-        const visible2 = extractVisibleMessages();
-        for (const msg of visible2) {
-          const key = msg.text.substring(0, 120).trim();
-          if (key.length > 0 && !seenTexts.has(key)) {
+      // Extract all currently visible pairs
+      for (const pair of pairs) {
+        // User message
+        const userCard = pair.querySelector(
+          "mat-card.from-user-message-card-content"
+        );
+        if (userCard) {
+          const textEl =
+            userCard.querySelector("div.message-text-content") ||
+            userCard.querySelector("mat-card-content.message-content") ||
+            userCard;
+          const text = textEl.textContent.trim();
+          const key = text.substring(0, 150);
+          if (text && key.length > 0 && !seenTexts.has(key)) {
             seenTexts.add(key);
-            allMessages.push(msg);
+            allMessages.push({ role: "user", text });
           }
         }
-        break;
+
+        // AI response
+        const aiCard = pair.querySelector(
+          "mat-card.to-user-message-card-content"
+        );
+        if (aiCard) {
+          const textEl =
+            aiCard.querySelector("div.message-text-content") ||
+            aiCard.querySelector("mat-card-content.message-content") ||
+            aiCard;
+          const text = domToMarkdown(textEl);
+          const key = text.substring(0, 150);
+          if (text && key.length > 0 && !seenTexts.has(key)) {
+            seenTexts.add(key);
+            allMessages.push({ role: "ai", text });
+          }
+        }
       }
 
-      const pct = Math.round(
-        ((scrollContainer.scrollTop + scrollContainer.clientHeight) /
-          scrollContainer.scrollHeight) *
-          100
+      // Scroll the LAST pair into view to advance
+      const lastPair = pairs[pairs.length - 1];
+      if (lastPair) {
+        lastPair.scrollIntoView({ block: "end", behavior: "instant" });
+      }
+      await sleep(400);
+
+      // Check if new pairs appeared (virtual scrolling loaded more)
+      const newPairs = document.querySelectorAll("div.chat-message-pair");
+      if (newPairs.length === lastPairCount) {
+        staleRounds++;
+        // If no new pairs after several scrolls, we've got everything
+        if (staleRounds >= 3) break;
+      } else {
+        staleRounds = 0;
+      }
+      lastPairCount = newPairs.length;
+
+      updateStatus(
+        `Collecting messages... (${allMessages.length} found)`
       );
-      updateStatus(`Collecting messages... ${pct}%`);
     }
 
     if (allMessages.length === 0) return null;
