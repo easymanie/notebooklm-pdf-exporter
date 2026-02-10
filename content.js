@@ -172,23 +172,8 @@
     const scrollContainer = findChatScrollContainer();
     if (!scrollContainer) return null;
 
-    // Check if there are any messages at all
-    const initialMessages = findMessagePairs();
-    if (initialMessages.length === 0) return null;
-
-    // Check if scrolling is needed
-    const needsScroll =
-      scrollContainer.scrollHeight > scrollContainer.clientHeight + 100;
-
-    if (!needsScroll) {
-      // All messages fit on screen — just extract directly
-      updateStatus("Extracting messages...");
-      const messages = extractVisibleMessages();
-      if (messages.length === 0) return null;
-      return messagesToMarkdown(messages);
-    }
-
-    // Need to scroll through the chat to collect all messages
+    // Always scroll to the top and collect the full chat,
+    // regardless of current scroll position.
     updateStatus("Scrolling to top...");
     scrollContainer.scrollTop = 0;
     await sleep(600);
