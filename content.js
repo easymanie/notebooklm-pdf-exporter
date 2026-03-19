@@ -90,6 +90,144 @@
     return null;
   }
 
+  function extractSources() {
+    const sources = [];
+    const sourcePanel = document.querySelector("section.source-panel");
+    if (!sourcePanel) return sources;
+
+    // Each source in the panel has a div with aria-label containing the source name
+    const sourceItems = sourcePanel.querySelectorAll(
+      "div.corpus-select-content div[aria-label]"
+    );
+
+    for (const item of sourceItems) {
+      const name = item.getAttribute("aria-label");
+      if (!name) continue;
+
+      // Try to find a link inside the source item
+      const link = item.querySelector("a[href]");
+      const href = link ? link.href : null;
+
+      // Determine type from name: .pdf, .html, or treat as link/webpage
+      let type = "document";
+      if (/\.pdf$/i.test(name)) type = "pdf";
+      else if (/\.html?$/i.test(name)) type = "webpage";
+      else if (href || !/\.\w{2,4}$/.test(name)) type = "webpage";
+
+      sources.push({ name: name.trim(), type, url: href });
+    }
+
+    return sources;
+  }
+
+  function sourcesToMarkdown(sources) {
+    if (sources.length === 0) return "";
+
+    const lines = ["\n---\n", "## Sources\n"];
+    sources.forEach((src, i) => {
+      const num = i + 1;
+      if (src.url) {
+        lines.push(`${num}. [${src.name}](${src.url})`);
+      } else {
+        lines.push(`${num}. ${src.name}`);
+      }
+    });
+    return lines.join("\n");
+  }
+
+  // --- Citation Resolution ---
+
+  function extractCitationMap(element, sources) {
+    // Inspect citation elements BEFORE domToMarkdown clones and converts them.
+    // Try to resolve each numbered citation to a source name.
+    const map = {};
+    const citationEls = element.querySelectorAll(
+      'a[href*="citation"], .citation, sup'
+    );
+
+    for (const el of citationEls) {
+      const num = el.textContent.trim();
+      if (!num || !/^\d+$/.test(num)) continue;
+      if (map[num]) continue; // already resolved
+
+      // Strategy 1: title or aria-label on the element itself
+      const title = el.getAttribute("title") || el.getAttribute("aria-label");
+      if (title) {
+        map[num] = title.trim();
+        continue;
+      }
+
+      // Strategy 2: data attributes that might reference a source
+      for (const attr of el.attributes) {
+        if (attr.name.startsWith("data-") && attr.value) {
+          // Check if the value matches or contains a source name
+          const match = sources.find(
+            (s) =>
+              attr.value.includes(s.name) ||
+              s.name.includes(attr.value) ||
+              attr.value === String(sources.indexOf(s))
+          );
+          if (match) {
+            map[num] = match.name;
+            break;
+          }
+        }
+      }
+      if (map[num]) continue;
+
+      // Strategy 3: href might encode a source index or identifier
+      const href = el.getAttribute("href") || "";
+      if (href) {
+        // Try extracting a source index from the href (e.g., "#citation-2")
+        const indexMatch = href.match(/(\d+)/);
+        if (indexMatch) {
+          const idx = parseInt(indexMatch[1], 10);
+          // NotebookLM often uses 0-based or 1-based index into sources
+          if (idx >= 0 && idx < sources.length) {
+            map[num] = sources[idx].name;
+            continue;
+          }
+          if (idx - 1 >= 0 && idx - 1 < sources.length) {
+            map[num] = sources[idx - 1].name;
+            continue;
+          }
+        }
+      }
+
+      // Strategy 4: parent/ancestor with a tooltip
+      const ancestor = el.closest("[title], [aria-label]");
+      if (ancestor && ancestor !== element) {
+        const label =
+          ancestor.getAttribute("title") || ancestor.getAttribute("aria-label");
+        if (label) {
+          map[num] = label.trim();
+          continue;
+        }
+      }
+
+      // Strategy 5: next sibling tooltip element (some UIs render tooltip as adjacent span)
+      const nextEl = el.nextElementSibling;
+      if (nextEl) {
+        const tip =
+          nextEl.getAttribute("title") ||
+          nextEl.getAttribute("aria-label") ||
+          "";
+        if (tip && tip.length > 5) {
+          map[num] = tip.trim();
+        }
+      }
+    }
+
+    return map;
+  }
+
+  function citationLegend(citationMap) {
+    const entries = Object.entries(citationMap);
+    if (entries.length === 0) return "";
+    const lines = entries.map(([num, name]) => `[${num}]: ${name}`);
+    return "\n> " + lines.join("\n> ") + "\n";
+  }
+
   function findArtifactContent() {
     // For reports/artifacts opened in the studio panel
     // Exclude .artifact-callout (that's just a small label)
@@ -146,7 +284,7 @@
 
   // --- Chat Extraction ---
 
-  function extractVisibleMessages() {
+  function extractVisibleMessages(sources) {
     // Collect all currently-rendered message pairs as structured data
     const pairs = findMessagePairs();
     const messages = [];
@@ -176,10 +314,13 @@
           aiCard.querySelector("div.message-text-content") ||
           aiCard.querySelector("mat-card-content.message-content") ||
           aiCard;
-        // For AI responses, preserve HTML structure (headings, lists, etc.)
+        // Resolve citations to source names before converting
+        const cMap = extractCitationMap(textEl, sources);
+        const md = domToMarkdown(textEl, cMap);
+        const legend = citationLegend(cMap);
         messages.push({
           role: "ai",
-          text: domToMarkdown(textEl),
+          text: md + legend,
         });
       }
     }
@@ -201,7 +342,7 @@
 
   // --- Scroll-and-Collect for Full Chat ---
 
-  async function extractFullChat(updateStatus) {
+  async function extractFullChat(updateStatus, sources) {
     // Instead of guessing the scroll container, we use scrollIntoView()
     // on message pairs — this works regardless of which element scrolls.
 
@@ -254,8 +395,12 @@
             aiCard.querySelector("div.message-text-content") ||
             aiCard.querySelector("mat-card-content.message-content") ||
             aiCard;
-          const text = domToMarkdown(textEl);
-          const key = text.substring(0, 150);
+          // Resolve citations per response
+          const cMap = extractCitationMap(textEl, sources);
+          const md = domToMarkdown(textEl, cMap);
+          const legend = citationLegend(cMap);
+          const text = md + legend;
+          const key = md.substring(0, 150);
           if (text && key.length > 0 && !seenTexts.has(key)) {
             seenTexts.add(key);
             allMessages.push({ role: "ai", text });
@@ -334,13 +479,30 @@
 
   // --- DOM to Markdown ---
 
-  function domToMarkdown(element) {
+  function domToMarkdown(element, citationMap) {
     const clone = element.cloneNode(true);
 
-    // Remove citations
+    // Convert citation superscripts to source references
     clone
       .querySelectorAll('a[href*="citation"], .citation, sup')
-      .forEach((el) => el.remove());
+      .forEach((el) => {
+        const text = el.textContent.trim();
+        if (text && /^\d+$/.test(text)) {
+          // If we resolved this citation to a source name, use it
+          const sourceName = citationMap && citationMap[text];
+          if (sourceName) {
+            el.replaceWith(
+              document.createTextNode(`[${text}: ${sourceName}]`)
+            );
+          } else {
+            el.replaceWith(document.createTextNode(`[${text}]`));
+          }
+        } else if (text) {
+          el.replaceWith(document.createTextNode(`[${text}]`));
+        } else {
+          el.remove();
+        }
+      });
 
     // Remove our own button if present
     const ourBtn = clone.querySelector(`#${BUTTON_ID}`);
@@ -483,18 +645,78 @@
     return div.innerHTML;
   }
 
+  function downloadMarkdownFile(markdown, title) {
+    const filename =
+      title.replace(/[^a-zA-Z0-9_\- ]/g, "").replace(/\s+/g, "_") + ".md";
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+  }
+
   // --- Export Handler ---
 
-  async function handleExportClick(e) {
-    if (e && e.preventDefault) {
-      e.preventDefault();
-      e.stopPropagation();
+  async function extractContent(updateStatus) {
+    // Extract sources first — needed for citation resolution
+    updateStatus("Extracting sources...");
+    const sources = extractSources();
+
+    let markdown = null;
+
+    // Primary: extract the full chat via scrolling
+    const chatPanel = findChatPanel();
+    if (chatPanel) {
+      updateStatus("Scanning chat...");
+      markdown = await extractFullChat(updateStatus, sources);
     }
 
+    // Secondary: try artifact/report extraction
+    if (!markdown) {
+      updateStatus("Checking for reports...");
+      const artifact = findArtifactContent();
+      if (artifact) {
+        const cMap = extractCitationMap(artifact, sources);
+        markdown = domToMarkdown(artifact, cMap);
+        const legend = citationLegend(cMap);
+        if (legend) markdown += legend;
+      }
+      if (!markdown) {
+        markdown = await extractArtifact();
+      }
+    }
+
+    // Append sources section at the end
+    if (markdown && markdown.trim().length > 0) {
+      const sourcesMd = sourcesToMarkdown(sources);
+      if (sourcesMd) {
+        markdown += "\n" + sourcesMd;
+      }
+    }
+
+    return markdown;
+  }
+
+  function deriveTitle(markdown) {
+    const notebookTitle = document.querySelector("h1.notebook-title");
+    const titleMatch = markdown.match(/^#\s+(.+)/m);
+    return notebookTitle
+      ? notebookTitle.textContent.trim()
+      : titleMatch
+        ? titleMatch[1].trim()
+        : "NotebookLM Export";
+  }
+
+  async function handleExport(format) {
     const btn = document.getElementById(BUTTON_ID);
-    let originalText = "Export PDF";
+    let originalText = btn ? btn.textContent : "Export PDF";
     if (btn) {
-      originalText = btn.textContent;
       btn.textContent = "Extracting...";
       btn.disabled = true;
     }
@@ -504,20 +726,7 @@
     };
 
     try {
-      let markdown = null;
-
-      // Primary: extract the full chat via scrolling
-      const chatPanel = findChatPanel();
-      if (chatPanel) {
-        updateStatus("Scanning chat...");
-        markdown = await extractFullChat(updateStatus);
-      }
-
-      // Secondary: try artifact/report extraction
-      if (!markdown) {
-        updateStatus("Checking for reports...");
-        markdown = await extractArtifact();
-      }
+      const markdown = await extractContent(updateStatus);
 
       if (!markdown || markdown.trim().length === 0) {
         showNotification(
@@ -527,21 +736,21 @@
         return;
       }
 
-      updateStatus("Generating PDF...");
+      const title = deriveTitle(markdown);
 
-      // Derive title from notebook title or first heading
-      const notebookTitle = document.querySelector("h1.notebook-title");
-      const titleMatch = markdown.match(/^#\s+(.+)/m);
-      const title = notebookTitle
-        ? notebookTitle.textContent.trim()
-        : titleMatch
-          ? titleMatch[1].trim()
-          : "NotebookLM Export";
-
-      const htmlContent = generatePrintHTML(markdown);
-      triggerPrint(htmlContent, title);
-
-      showNotification("PDF ready! Use the print dialog to save.", "success");
+      if (format === "markdown") {
+        updateStatus("Downloading Markdown...");
+        downloadMarkdownFile(markdown, title);
+        showNotification("Markdown file downloaded.", "success");
+      } else {
+        updateStatus("Generating PDF...");
+        const htmlContent = generatePrintHTML(markdown);
+        triggerPrint(htmlContent, title);
+        showNotification(
+          "PDF ready! Use the print dialog to save.",
+          "success"
+        );
+      }
     } catch (err) {
       console.error("[NotebookLM PDF] Export failed:", err);
       showNotification("Export failed: " + err.message, "error");
@@ -551,6 +760,14 @@
         btn.disabled = false;
       }
     }
+  }
+
+  async function handleExportClick(e) {
+    if (e && e.preventDefault) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    await handleExport("pdf");
   }
 
   // --- Notification ---
@@ -598,6 +815,36 @@
     const messagePairs = findMessagePairs();
     const artifact = findArtifactContent();
     const copyBtn = findCopyButton();
+
+    // Inspect citation elements for debugging
+    const citationElements = [];
+    document
+      .querySelectorAll('a[href*="citation"], .citation, sup')
+      .forEach((el) => {
+        const info = {
+          tag: el.tagName.toLowerCase(),
+          text: el.textContent.trim(),
+          href: el.getAttribute("href"),
+          title: el.getAttribute("title"),
+          ariaLabel: el.getAttribute("aria-label"),
+          className: el.className || null,
+          dataAttrs: {},
+        };
+        for (const attr of el.attributes) {
+          if (attr.name.startsWith("data-")) {
+            info.dataAttrs[attr.name] = attr.value;
+          }
+        }
+        // Also check parent for context
+        if (el.parentElement) {
+          info.parentTag = el.parentElement.tagName.toLowerCase();
+          info.parentClass = el.parentElement.className || null;
+          info.parentTitle = el.parentElement.getAttribute("title");
+          info.parentAriaLabel =
+            el.parentElement.getAttribute("aria-label");
+        }
+        citationElements.push(info);
+      });
 
     const ariaLabels = [];
     document.querySelectorAll("[aria-label]").forEach((el) => {
@@ -648,6 +895,8 @@
         : artifact
           ? artifact.textContent.trim().length
           : 0,
+      sources: extractSources(),
+      citationElements: citationElements.slice(0, 20),
       ariaLabels: ariaLabels.slice(0, 50),
       notableClasses: [...notableClasses].slice(0, 50),
     };
@@ -657,18 +906,23 @@
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "exportPDF") {
-      handleExportClick(null).catch(console.error);
+      handleExport("pdf").catch(console.error);
+      sendResponse({ status: "started" });
+    } else if (message.action === "exportMarkdown") {
+      handleExport("markdown").catch(console.error);
       sendResponse({ status: "started" });
     } else if (message.action === "getStatus") {
       const chatPanel = findChatPanel();
       const msgCount = findMessagePairs().length;
       const artifact = findArtifactContent();
+      const sources = extractSources();
       sendResponse({
         onNotebookLM: true,
         hasContent: msgCount > 0 || !!artifact,
         hasReport: !!artifact,
         hasChat: msgCount > 0,
         messageCount: msgCount,
+        sourceCount: sources.length,
         contentLength: chatPanel
           ? chatPanel.textContent.trim().length
           : artifact

@@ -245,6 +245,11 @@
     page-break-inside: avoid;
   }
 
+  /* Sources section */
+  .nlm-print-body h2:last-of-type {
+    page-break-before: auto;
+  }
+
   /* Page setup */
   @page {
     size: A4;

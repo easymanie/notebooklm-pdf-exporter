@@ -1,6 +1,7 @@
 (function () {
   const statusEl = document.getElementById("status");
   const exportBtn = document.getElementById("exportBtn");
+  const exportMdBtn = document.getElementById("exportMdBtn");
   const tipEl = document.getElementById("tip");
   const diagnoseBtn = document.getElementById("diagnoseBtn");
   const diagPanel = document.getElementById("diagPanel");
@@ -39,28 +40,35 @@
           return;
         }
 
+        const srcInfo = response.sourceCount
+          ? `, ${response.sourceCount} source${response.sourceCount !== 1 ? "s" : ""}`
+          : "";
+
         if (response.hasChat && response.messageCount > 0) {
           setStatus(
             "green",
-            `Chat detected (${response.messageCount} message pairs)`
+            `Chat detected (${response.messageCount} message pairs${srcInfo})`
           );
           exportBtn.disabled = false;
+          exportMdBtn.disabled = false;
           tipEl.textContent =
-            "The extension will scroll through the full chat to capture all messages.";
+            "The extension will scroll through the full chat to capture all messages and sources.";
         } else if (response.hasReport) {
           setStatus(
             "green",
             `Report detected (${response.contentLength.toLocaleString()} chars)`
           );
           exportBtn.disabled = false;
+          exportMdBtn.disabled = false;
           tipEl.textContent =
-            'Click "Export as PDF" to export the report.';
+            "Export as PDF or Markdown.";
         } else if (response.hasContent) {
           setStatus(
             "green",
             `Content detected (${response.contentLength.toLocaleString()} chars)`
           );
           exportBtn.disabled = false;
+          exportMdBtn.disabled = false;
           tipEl.textContent =
             "Tip: For best results, open a generated report or note first.";
         } else {
@@ -72,14 +80,30 @@
     );
   });
 
-  // Export button
+  // Export as PDF
   exportBtn.addEventListener("click", () => {
     exportBtn.disabled = true;
+    exportMdBtn.disabled = true;
     exportBtn.textContent = "Exporting...";
 
     chrome.tabs.sendMessage(
       currentTab.id,
       { action: "exportPDF" },
+      () => {
+        window.close();
+      }
+    );
+  });
+
+  // Export as Markdown
+  exportMdBtn.addEventListener("click", () => {
+    exportBtn.disabled = true;
+    exportMdBtn.disabled = true;
+    exportMdBtn.textContent = "Exporting...";
+
+    chrome.tabs.sendMessage(
+      currentTab.id,
+      { action: "exportMarkdown" },
       () => {
         window.close();
       }
@@ -125,6 +149,32 @@
             `  Text length: ${response.contentLength.toLocaleString()} chars`
           );
         }
+        lines.push("");
+        lines.push(`--- Sources (${(response.sources || []).length}) ---`);
+        (response.sources || []).forEach((s, i) =>
+          lines.push(`  ${i + 1}. ${s.name}${s.url ? " → " + s.url : ""} [${s.type}]`)
+        );
+        lines.push("");
+        lines.push(
+          `--- Citations (${(response.citationElements || []).length}) ---`
+        );
+        (response.citationElements || []).forEach((c) => {
+          const attrs = [];
+          if (c.href) attrs.push(`href="${c.href}"`);
+          if (c.title) attrs.push(`title="${c.title}"`);
+          if (c.ariaLabel) attrs.push(`aria="${c.ariaLabel}"`);
+          if (c.className) attrs.push(`class="${c.className}"`);
+          const dataKeys = Object.keys(c.dataAttrs || {});
+          dataKeys.forEach((k) => attrs.push(`${k}="${c.dataAttrs[k]}"`));
+          lines.push(
+            `  <${c.tag}>${c.text}</${c.tag}> ${attrs.join(" ") || "(no attrs)"}`
+          );
+          if (c.parentTitle || c.parentAriaLabel) {
+            lines.push(
+              `    parent: ${c.parentTag} title="${c.parentTitle || ""}" aria="${c.parentAriaLabel || ""}"`
+            );
+          }
+        });
         lines.push("");
         lines.push(`--- Aria labels (${response.ariaLabels.length}) ---`);
         response.ariaLabels.forEach((l) => lines.push("  " + l));

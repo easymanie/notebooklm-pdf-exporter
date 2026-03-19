@@ -86,6 +86,14 @@
         cursor: not-allowed;
       }
 
+      button.export-md-btn {
+        background: #34a853;
+      }
+
+      button.export-md-btn:hover {
+        background: #2d9249;
+      }
+
       button.diagnose-btn {
         padding: 10px 14px;
         border: 1px solid #dadce0;
@@ -160,6 +168,11 @@
       <button id="exportBtn" class="export-btn" disabled>
         Export as PDF
       </button>
+      <button id="exportMdBtn" class="export-btn export-md-btn" disabled>
+        Export as MD
+      </button>
+    </div>
+    <div class="btn-row">
       <button id="diagnoseBtn" class="diagnose-btn" title="Show what the extension can see on this page">
         Diagnose
       </button>
