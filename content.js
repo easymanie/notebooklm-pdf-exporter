@@ -95,26 +95,275 @@
     const sourcePanel = document.querySelector("section.source-panel");
     if (!sourcePanel) return sources;
 
-    // Each source in the panel has a div with aria-label containing the source name
-    const sourceItems = sourcePanel.querySelectorAll(
-      "div.corpus-select-content div[aria-label]"
-    );
+    const skipLabels = new Set([
+      "Select all sources",
+      "Collapse source panel",
+      "Add source",
+    ]);
+    const seen = new Set();
 
-    for (const item of sourceItems) {
-      const name = item.getAttribute("aria-label");
-      if (!name) continue;
+    const candidates = sourcePanel.querySelectorAll("div[aria-label]");
+    for (const item of candidates) {
+      const name = (item.getAttribute("aria-label") || "").trim();
+      if (!name || skipLabels.has(name) || seen.has(name)) continue;
+      seen.add(name);
 
-      // Try to find a link inside the source item
       const link = item.querySelector("a[href]");
       const href = link ? link.href : null;
 
-      // Determine type from name: .pdf, .html, or treat as link/webpage
       let type = "document";
       if (/\.pdf$/i.test(name)) type = "pdf";
       else if (/\.html?$/i.test(name)) type = "webpage";
       else if (href || !/\.\w{2,4}$/.test(name)) type = "webpage";
 
-      sources.push({ name: name.trim(), type, url: href });
+      sources.push({ name, type, url: href, description: null });
+    }
+
+    return sources;
+  }
+
+  function findSourceButton(name) {
+    // Can't use CSS.escape on aria-label values — it escapes dots, spaces etc.
+    // Instead, iterate all buttons in the source panel and match by aria-label.
+    const panel = document.querySelector("section.source-panel");
+    if (!panel) return null;
+    const buttons = panel.querySelectorAll("button[aria-label]");
+    for (const btn of buttons) {
+      if (btn.getAttribute("aria-label") === name) return btn;
+    }
+    return null;
+  }
+
+  async function waitForElement(selector, timeout) {
+    const deadline = Date.now() + (timeout || 3000);
+    while (Date.now() < deadline) {
+      const el = document.querySelector(selector);
+      if (el) return el;
+      await sleep(200);
+    }
+    return null;
+  }
+
+  async function navigateBackToSourceList() {
+    // Multiple strategies to get back from the source detail view to the list.
+
+    const isListVisible = () => {
+      const panel = document.querySelector("section.source-panel");
+      if (!panel) return false;
+      // Detail view gone AND source list items present
+      const hasDetail = panel.querySelector("div.source-panel-view-content") ||
+                        panel.querySelector("section.source-panel-view");
+      const hasList = panel.querySelector("div[aria-label]");
+      return !hasDetail && !!hasList;
+    };
+
+    const pollForList = async (maxWait) => {
+      const attempts = Math.ceil((maxWait || 3000) / 200);
+      for (let t = 0; t < attempts; t++) {
+        await sleep(200);
+        if (isListVisible()) return true;
+      }
+      return false;
+    };
+
+    if (isListVisible()) return true;
+
+    // Log all buttons in source panel for debugging
+    const sourcePanel = document.querySelector("section.source-panel");
+    if (sourcePanel) {
+      const allBtns = sourcePanel.querySelectorAll("button");
+      console.log(`[NotebookLM PDF]   Source panel has ${allBtns.length} buttons:`);
+      allBtns.forEach((b, i) => {
+        const label = b.getAttribute("aria-label") || "";
+        const text = b.textContent.trim().substring(0, 60);
+        const cls = b.className || "";
+        console.log(`[NotebookLM PDF]     ${i}: aria="${label}" text="${text}" class="${cls}"`);
+      });
+    }
+
+    // Strategy 1: "Close source guide" button
+    const closeBtn = document.querySelector(
+      'button[aria-label="Close source guide"]'
+    );
+    if (closeBtn) {
+      console.log("[NotebookLM PDF]   Back strategy 1: Close source guide button");
+      closeBtn.click();
+      if (await pollForList(3000)) return true;
+    }
+
+    // Strategy 2: Clickable panel header (the source name / back arrow area)
+    const headerClick = document.querySelector(
+      "section.source-panel span.panel-header-clickable"
+    );
+    if (headerClick) {
+      console.log("[NotebookLM PDF]   Back strategy 2: panel header click");
+      headerClick.click();
+      if (await pollForList(3000)) return true;
+    }
+
+    // Strategy 3: The h2 panel header itself
+    const h2Header = document.querySelector(
+      "section.source-panel h2.panel-header-content"
+    );
+    if (h2Header) {
+      console.log("[NotebookLM PDF]   Back strategy 3: h2 header click");
+      h2Header.click();
+      if (await pollForList(3000)) return true;
+    }
+
+    // Strategy 4: Any button containing mat-icon with arrow_back
+    if (sourcePanel) {
+      const icons = sourcePanel.querySelectorAll("mat-icon");
+      for (const icon of icons) {
+        const iconText = icon.textContent.trim().toLowerCase();
+        if (iconText === "arrow_back" || iconText === "close" || iconText === "arrow_back_ios") {
+          const clickTarget = icon.closest("button") || icon.parentElement;
+          if (clickTarget) {
+            console.log(`[NotebookLM PDF]   Back strategy 4: mat-icon "${iconText}" in ${clickTarget.tagName}`);
+            clickTarget.click();
+            if (await pollForList(3000)) return true;
+          }
+        }
+      }
+    }
+
+    // Strategy 5: Any button with close/back in aria-label or text
+    if (sourcePanel) {
+      const allButtons = sourcePanel.querySelectorAll("button");
+      for (const btn of allButtons) {
+        const label = (btn.getAttribute("aria-label") || "").toLowerCase();
+        const text = btn.textContent.trim().toLowerCase();
+        if (
+          label.includes("close") ||
+          label.includes("back") ||
+          text.includes("arrow_back") ||
+          text.includes("close")
+        ) {
+          console.log(
+            `[NotebookLM PDF]   Back strategy 5: button aria="${label}" text="${text.substring(0, 40)}"`
+          );
+          btn.click();
+          if (await pollForList(3000)) return true;
+        }
+      }
+    }
+
+    // Strategy 6: Escape key — Angular Material often responds to Escape
+    console.log("[NotebookLM PDF]   Back strategy 6: Escape key");
+    const panel = document.querySelector("section.source-panel") || document.body;
+    panel.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Escape", code: "Escape", keyCode: 27, bubbles: true, cancelable: true
+    }));
+    if (await pollForList(2000)) return true;
+
+    // Strategy 7: Click the source-panel-view header area itself (acts as back)
+    const viewHeader = document.querySelector("section.source-panel-view .panel-header") ||
+                       document.querySelector("section.source-panel .source-panel-view .panel-header");
+    if (viewHeader) {
+      console.log("[NotebookLM PDF]   Back strategy 7: click view header");
+      viewHeader.click();
+      if (await pollForList(3000)) return true;
+    }
+
+    console.warn("[NotebookLM PDF]   All back strategies failed. DOM state:");
+    if (sourcePanel) {
+      console.warn("[NotebookLM PDF]   Panel HTML (first 500):", sourcePanel.innerHTML.substring(0, 500));
+    }
+    return false;
+  }
+
+  async function enrichSources(sources, updateStatus) {
+    // Click each source to open its detail view, scrape the source guide
+    // summary, then navigate back to the source list.
+    if (sources.length === 0) return sources;
+
+    // Make sure we start from the source list view (not a detail view)
+    if (document.querySelector("div.source-panel-view-content")) {
+      await navigateBackToSourceList();
+    }
+
+    for (let i = 0; i < sources.length; i++) {
+      const src = sources[i];
+      updateStatus(`Reading source ${i + 1}/${sources.length}...`);
+      console.log(`[NotebookLM PDF] Enriching source ${i + 1}/${sources.length}: "${src.name}"`);
+
+      // Find and click the source button (re-query each time since DOM changes)
+      const srcBtn = findSourceButton(src.name);
+      if (!srcBtn) {
+        console.warn(`[NotebookLM PDF]   Button NOT found, skipping`);
+        continue;
+      }
+      console.log(`[NotebookLM PDF]   Button found, clicking...`);
+
+      srcBtn.click();
+
+      // Wait for the detail view to appear
+      const detailPanel = await waitForElement(
+        "div.source-panel-view-content",
+        3000
+      );
+      if (!detailPanel) {
+        console.warn(`[NotebookLM PDF]   Detail panel did NOT appear`);
+        await navigateBackToSourceList();
+        continue;
+      }
+      console.log(`[NotebookLM PDF]   Detail panel appeared`);
+
+      // Give the source guide a moment to render its summary
+      await sleep(400);
+
+      // Re-query in case the content populated after initial appearance
+      const panel = document.querySelector("div.source-panel-view-content");
+      if (!panel) {
+        console.warn(`[NotebookLM PDF]   Panel disappeared after wait`);
+        await navigateBackToSourceList();
+        continue;
+      }
+
+      // Extract the AI-generated source guide summary.
+      const fullText = panel.textContent.trim();
+      console.log(`[NotebookLM PDF]   Full text length: ${fullText.length}`);
+      const titleEl = panel.querySelector("div.source-title");
+      const titleText = titleEl ? titleEl.textContent.trim() : "";
+
+      // The summary follows the title + icon labels.
+      let summary = fullText;
+      if (titleText) {
+        const titleIdx = summary.indexOf(titleText);
+        if (titleIdx >= 0) {
+          summary = summary.substring(titleIdx + titleText.length);
+        }
+      }
+      // Remove icon/label text that leaks from mat-icon elements
+      summary = summary
+        .replace(/button_magic/g, "")
+        .replace(/Source guide/g, "")
+        .replace(/arrow_drop_up/g, "")
+        .replace(/arrow_drop_down/g, "")
+        .trim();
+
+      // The summary ends before topic tags or document excerpts.
+      // Find the last sentence-ending period before the text degrades
+      // into short topic phrases or raw document content.
+      if (summary.length > 500) {
+        const cut = summary.lastIndexOf(".", 500);
+        if (cut > 100) summary = summary.substring(0, cut + 1);
+      }
+
+      src.description = summary || null;
+      console.log(`[NotebookLM PDF]   Description: ${summary ? summary.substring(0, 80) + "..." : "NULL"}`);
+
+      // Navigate back to source list before the next iteration
+      console.log(`[NotebookLM PDF]   Navigating back...`);
+      const ok = await navigateBackToSourceList();
+      if (!ok) {
+        console.warn(
+          "[NotebookLM PDF] Could not navigate back after source:",
+          src.name
+        );
+        break;
+      }
+      console.log(`[NotebookLM PDF]   Back to source list`);
     }
 
     return sources;
@@ -131,90 +380,32 @@
       } else {
         lines.push(`${num}. ${src.name}`);
       }
+      if (src.description) {
+        lines.push(`   ${src.description}`);
+      }
     });
     return lines.join("\n");
   }
 
   // --- Citation Resolution ---
 
-  function extractCitationMap(element, sources) {
-    // Inspect citation elements BEFORE domToMarkdown clones and converts them.
-    // Try to resolve each numbered citation to a source name.
+  function extractCitationMap(element) {
+    // NotebookLM citations are:
+    //   button.citation-marker
+    //     └── span[aria-label="N: Source Name"]
+    // Extract the mapping from citation number to source name.
     const map = {};
-    const citationEls = element.querySelectorAll(
-      'a[href*="citation"], .citation, sup'
-    );
+    const markers = element.querySelectorAll("button.citation-marker");
 
-    for (const el of citationEls) {
-      const num = el.textContent.trim();
-      if (!num || !/^\d+$/.test(num)) continue;
-      if (map[num]) continue; // already resolved
+    for (const btn of markers) {
+      const labelSpan = btn.querySelector("span[aria-label]");
+      if (!labelSpan) continue;
 
-      // Strategy 1: title or aria-label on the element itself
-      const title = el.getAttribute("title") || el.getAttribute("aria-label");
-      if (title) {
-        map[num] = title.trim();
-        continue;
-      }
-
-      // Strategy 2: data attributes that might reference a source
-      for (const attr of el.attributes) {
-        if (attr.name.startsWith("data-") && attr.value) {
-          // Check if the value matches or contains a source name
-          const match = sources.find(
-            (s) =>
-              attr.value.includes(s.name) ||
-              s.name.includes(attr.value) ||
-              attr.value === String(sources.indexOf(s))
-          );
-          if (match) {
-            map[num] = match.name;
-            break;
-          }
-        }
-      }
-      if (map[num]) continue;
-
-      // Strategy 3: href might encode a source index or identifier
-      const href = el.getAttribute("href") || "";
-      if (href) {
-        // Try extracting a source index from the href (e.g., "#citation-2")
-        const indexMatch = href.match(/(\d+)/);
-        if (indexMatch) {
-          const idx = parseInt(indexMatch[1], 10);
-          // NotebookLM often uses 0-based or 1-based index into sources
-          if (idx >= 0 && idx < sources.length) {
-            map[num] = sources[idx].name;
-            continue;
-          }
-          if (idx - 1 >= 0 && idx - 1 < sources.length) {
-            map[num] = sources[idx - 1].name;
-            continue;
-          }
-        }
-      }
-
-      // Strategy 4: parent/ancestor with a tooltip
-      const ancestor = el.closest("[title], [aria-label]");
-      if (ancestor && ancestor !== element) {
-        const label =
-          ancestor.getAttribute("title") || ancestor.getAttribute("aria-label");
-        if (label) {
-          map[num] = label.trim();
-          continue;
-        }
-      }
-
-      // Strategy 5: next sibling tooltip element (some UIs render tooltip as adjacent span)
-      const nextEl = el.nextElementSibling;
-      if (nextEl) {
-        const tip =
-          nextEl.getAttribute("title") ||
-          nextEl.getAttribute("aria-label") ||
-          "";
-        if (tip && tip.length > 5) {
-          map[num] = tip.trim();
-        }
+      const aria = labelSpan.getAttribute("aria-label") || "";
+      // Format: "1: Source Name Here"
+      const match = aria.match(/^(\d+):\s*(.+)$/);
+      if (match) {
+        map[match[1]] = match[2].trim();
       }
     }
 
@@ -245,41 +436,82 @@
 
   // --- Button Injection ---
 
+  const WRAPPER_ID = "nlm-pdf-export-wrapper";
+
   function createExportButton() {
+    const wrapper = document.createElement("div");
+    wrapper.id = WRAPPER_ID;
+    wrapper.className = "nlm-export-wrapper";
+
     const btn = document.createElement("button");
     btn.id = BUTTON_ID;
-    btn.textContent = "Export PDF";
-    btn.title = "Export this chat as a clean PDF";
+    btn.title = "Export this chat";
     btn.className = "nlm-export-btn";
-    btn.addEventListener("click", handleExportClick);
-    return btn;
+    btn.innerHTML = 'Export <span class="nlm-export-btn-arrow">&#9660;</span>';
+
+    const dropdown = document.createElement("div");
+    dropdown.className = "nlm-export-dropdown";
+
+    const pdfItem = document.createElement("button");
+    pdfItem.className = "nlm-export-dropdown-item";
+    pdfItem.textContent = "Export as PDF";
+    pdfItem.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.remove("visible");
+      handleExport("pdf");
+    });
+
+    const mdItem = document.createElement("button");
+    mdItem.className = "nlm-export-dropdown-item";
+    mdItem.textContent = "Export as Markdown";
+    mdItem.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.remove("visible");
+      handleExport("markdown");
+    });
+
+    dropdown.appendChild(pdfItem);
+    dropdown.appendChild(mdItem);
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("visible");
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener("click", () => {
+      dropdown.classList.remove("visible");
+    });
+
+    wrapper.appendChild(btn);
+    wrapper.appendChild(dropdown);
+    return wrapper;
   }
 
   function injectButton() {
-    if (document.getElementById(BUTTON_ID)) return;
+    if (document.getElementById(WRAPPER_ID)) return;
 
     // Place button in the chat panel header area
     const chatHeaderButtons = document.querySelector("span.chat-header-buttons");
     if (chatHeaderButtons) {
-      const btn = createExportButton();
-      chatHeaderButtons.prepend(btn);
+      chatHeaderButtons.prepend(createExportButton());
       return;
     }
 
     // Fallback: float in the chat panel
     const chatPanel = findChatPanel();
     if (chatPanel) {
-      const btn = createExportButton();
-      btn.classList.add("nlm-export-btn-floating");
+      const wrapper = createExportButton();
+      wrapper.classList.add("nlm-export-wrapper-floating");
       chatPanel.style.position = "relative";
-      chatPanel.prepend(btn);
+      chatPanel.prepend(wrapper);
       return;
     }
   }
 
   function removeButton() {
-    const btn = document.getElementById(BUTTON_ID);
-    if (btn) btn.remove();
+    const el = document.getElementById(WRAPPER_ID);
+    if (el) el.remove();
   }
 
   // --- Chat Extraction ---
@@ -315,7 +547,7 @@
           aiCard.querySelector("mat-card-content.message-content") ||
           aiCard;
         // Resolve citations to source names before converting
-        const cMap = extractCitationMap(textEl, sources);
+        const cMap = extractCitationMap(textEl);
         const md = domToMarkdown(textEl, cMap);
         const legend = citationLegend(cMap);
         messages.push({
@@ -396,7 +628,7 @@
             aiCard.querySelector("mat-card-content.message-content") ||
             aiCard;
           // Resolve citations per response
-          const cMap = extractCitationMap(textEl, sources);
+          const cMap = extractCitationMap(textEl);
           const md = domToMarkdown(textEl, cMap);
           const legend = citationLegend(cMap);
           const text = md + legend;
@@ -482,29 +714,19 @@
   function domToMarkdown(element, citationMap) {
     const clone = element.cloneNode(true);
 
-    // Convert citation superscripts to source references
-    clone
-      .querySelectorAll('a[href*="citation"], .citation, sup')
-      .forEach((el) => {
-        const text = el.textContent.trim();
-        if (text && /^\d+$/.test(text)) {
-          // If we resolved this citation to a source name, use it
-          const sourceName = citationMap && citationMap[text];
-          if (sourceName) {
-            el.replaceWith(
-              document.createTextNode(`[${text}: ${sourceName}]`)
-            );
-          } else {
-            el.replaceWith(document.createTextNode(`[${text}]`));
-          }
-        } else if (text) {
-          el.replaceWith(document.createTextNode(`[${text}]`));
-        } else {
-          el.remove();
-        }
-      });
+    // Convert citation markers (button.citation-marker) to inline [N] references
+    clone.querySelectorAll("button.citation-marker").forEach((btn) => {
+      const num = btn.textContent.trim();
+      if (num && /^\d+$/.test(num)) {
+        btn.replaceWith(document.createTextNode(` [${num}]`));
+      } else {
+        btn.remove();
+      }
+    });
 
     // Remove our own button if present
+    const ourWrapper = clone.querySelector(`#${WRAPPER_ID}`);
+    if (ourWrapper) ourWrapper.remove();
     const ourBtn = clone.querySelector(`#${BUTTON_ID}`);
     if (ourBtn) ourBtn.remove();
 
@@ -682,7 +904,7 @@
       updateStatus("Checking for reports...");
       const artifact = findArtifactContent();
       if (artifact) {
-        const cMap = extractCitationMap(artifact, sources);
+        const cMap = extractCitationMap(artifact);
         markdown = domToMarkdown(artifact, cMap);
         const legend = citationLegend(cMap);
         if (legend) markdown += legend;
@@ -692,8 +914,9 @@
       }
     }
 
-    // Append sources section at the end
-    if (markdown && markdown.trim().length > 0) {
+    // Enrich sources with metadata from detail views, then append
+    if (markdown && markdown.trim().length > 0 && sources.length > 0) {
+      await enrichSources(sources, updateStatus);
       const sourcesMd = sourcesToMarkdown(sources);
       if (sourcesMd) {
         markdown += "\n" + sourcesMd;
@@ -715,7 +938,9 @@
 
   async function handleExport(format) {
     const btn = document.getElementById(BUTTON_ID);
-    let originalText = btn ? btn.textContent : "Export PDF";
+    const originalHTML = btn
+      ? btn.innerHTML
+      : 'Export <span class="nlm-export-btn-arrow">&#9660;</span>';
     if (btn) {
       btn.textContent = "Extracting...";
       btn.disabled = true;
@@ -756,18 +981,10 @@
       showNotification("Export failed: " + err.message, "error");
     } finally {
       if (btn) {
-        btn.textContent = originalText;
+        btn.innerHTML = originalHTML;
         btn.disabled = false;
       }
     }
-  }
-
-  async function handleExportClick(e) {
-    if (e && e.preventDefault) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    await handleExport("pdf");
   }
 
   // --- Notification ---
@@ -816,35 +1033,76 @@
     const artifact = findArtifactContent();
     const copyBtn = findCopyButton();
 
-    // Inspect citation elements for debugging
+    // Inspect citation elements for debugging.
+    // Broad search: look inside AI response cards for any small inline elements
+    // that might be citations (numbered references, footnotes, etc.)
     const citationElements = [];
-    document
-      .querySelectorAll('a[href*="citation"], .citation, sup')
-      .forEach((el) => {
-        const info = {
-          tag: el.tagName.toLowerCase(),
-          text: el.textContent.trim(),
-          href: el.getAttribute("href"),
-          title: el.getAttribute("title"),
-          ariaLabel: el.getAttribute("aria-label"),
-          className: el.className || null,
-          dataAttrs: {},
-        };
-        for (const attr of el.attributes) {
-          if (attr.name.startsWith("data-")) {
-            info.dataAttrs[attr.name] = attr.value;
-          }
+    const aiCards = document.querySelectorAll(
+      "mat-card.to-user-message-card-content"
+    );
+    for (const card of aiCards) {
+      // Look for the known selectors
+      card
+        .querySelectorAll('a[href*="citation"], .citation, sup')
+        .forEach((el) => citationElements.push(describeCitationEl(el)));
+
+      // Also scan for any small clickable/inline elements with short numeric text
+      // that could be citation markers (spans, buttons, anchors, custom elements)
+      card.querySelectorAll("a, button, span").forEach((el) => {
+        const text = el.textContent.trim();
+        if (text.length > 0 && text.length <= 3 && /^\d+$/.test(text)) {
+          // Small numbered element — likely a citation
+          citationElements.push(describeCitationEl(el));
         }
-        // Also check parent for context
-        if (el.parentElement) {
-          info.parentTag = el.parentElement.tagName.toLowerCase();
-          info.parentClass = el.parentElement.className || null;
-          info.parentTitle = el.parentElement.getAttribute("title");
-          info.parentAriaLabel =
-            el.parentElement.getAttribute("aria-label");
-        }
-        citationElements.push(info);
       });
+      // Limit per card to avoid noise
+      if (citationElements.length >= 30) break;
+    }
+
+    function describeCitationEl(el) {
+      const info = {
+        tag: el.tagName.toLowerCase(),
+        text: el.textContent.trim(),
+        href: el.getAttribute("href"),
+        title: el.getAttribute("title"),
+        ariaLabel: el.getAttribute("aria-label"),
+        className: el.className || null,
+        dataAttrs: {},
+      };
+      for (const attr of el.attributes) {
+        if (attr.name.startsWith("data-")) {
+          info.dataAttrs[attr.name] = attr.value;
+        }
+      }
+      if (el.parentElement) {
+        info.parentTag = el.parentElement.tagName.toLowerCase();
+        info.parentClass = el.parentElement.className || null;
+        info.parentTitle = el.parentElement.getAttribute("title");
+        info.parentAriaLabel =
+          el.parentElement.getAttribute("aria-label");
+      }
+      return info;
+    }
+
+    // Capture source detail view if open
+    let sourceDetailView = null;
+    const detailPanel = document.querySelector("div.source-panel-view-content");
+    if (detailPanel) {
+      const childEls = [];
+      detailPanel.querySelectorAll("*").forEach((child) => {
+        if (child.children.length === 0 && child.textContent.trim()) {
+          childEls.push({
+            tag: child.tagName.toLowerCase(),
+            class: child.className || null,
+            text: child.textContent.trim().substring(0, 200),
+          });
+        }
+      });
+      sourceDetailView = {
+        fullText: detailPanel.textContent.trim().substring(0, 1000),
+        childElements: childEls.slice(0, 30),
+      };
+    }
 
     const ariaLabels = [];
     document.querySelectorAll("[aria-label]").forEach((el) => {
@@ -896,6 +1154,7 @@
           ? artifact.textContent.trim().length
           : 0,
       sources: extractSources(),
+      sourceDetailView,
       citationElements: citationElements.slice(0, 20),
       ariaLabels: ariaLabels.slice(0, 50),
       notableClasses: [...notableClasses].slice(0, 50),
